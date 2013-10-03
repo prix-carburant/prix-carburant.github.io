@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html>
+
+  <head>
+    <meta charset='utf-8' />
+    <meta http-equiv="X-UA-Compatible" content="chrome=1" />
+    <meta name="description" content="Prix carburant : " />
+
+    <link rel="stylesheet" type="text/css" media="screen" href="stylesheets/stylesheet.css">
+
+    <title>Prix carburant</title>
+  </head>
+
+  <body>
+
+    <!-- HEADER -->
+    <div id="header_wrap" class="outer">
+        <header class="inner">
+          <a id="forkme_banner" href="https://github.com/prix-carburant/prix-carburant-data">View on GitHub</a>
+
+          <h1 id="project_title">Prix carburant</h1>
+          <h2 id="project_tagline"></h2>
+
+            <section id="downloads">
+              <a class="zip_download_link" href="https://github.com/prix-carburant/prix-carburant-data/zipball/master">Download this project as a .zip file</a>
+              <a class="tar_download_link" href="https://github.com/prix-carburant/prix-carburant-data/tarball/master">Download this project as a tar.gz file</a>
+            </section>
+        </header>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div id="main_content_wrap" class="outer">
+      <section id="main_content" class="inner">
+        <h3>
+<a name="prix-des-carburants-en-france-site-non-gouvernemental" class="anchor" href="#prix-des-carburants-en-france-site-non-gouvernemental"><span class="octicon octicon-link"></span></a>Prix des carburants en France, site non gouvernemental.</h3>
+
+<p>Ce repository est destiné à héberger les données actuelles et historiques de <a href="http://prix-carburants.gouv.fr">http://prix-carburants.gouv.fr</a></p>
+
+<p>Ces données sont disponibles à des tarifs prohibitifs, de 3 000 euros par an pour une utilisation <strong>non commerciale</strong> (mais wtf ?) à 38 500 euros pour une "réutilisation commerciale intermédiaire", ce que j'imagine correspondre à une autorisation de redistribution des données (voir <a href="http://www.prix-carburants.economie.gouv.fr/document/arrete_28_02_2013.pdf">http://www.prix-carburants.economie.gouv.fr/document/arrete_28_02_2013.pdf</a>).</p>
+
+<p>C'est d'une part bien trop cher pour un étudiant ou n'importe quel indépendant, et d'autre part trop cher pour des données publiques, qui sont communiquées directement par les commerçants, si j'ai bien compris.</p>
+
+<p>En plus de cela, le site ne fonctionne pas sans cookies.</p>
+
+<p>À titre d'exemple, voici une carte rapide des derniers prix du gasoil.</p>
+
+
+<script src="d3.v3.min.js"></script>
+<script src="d3.geo.tile.v0.min.js"></script>
+<script src="queue.v1.min.js"></script>
+<script src="d3.hexbin.v0.min.js"></script>
+
+<script>
+
+var width = 640,
+	height = 620;
+
+var tile = d3.geo.tile()
+	.size([width, height]);
+
+var projection = d3.geo.mercator()
+	.scale((1 << 14) / 2 / Math.PI)
+	.translate([width / 2, height / 2]);
+
+var center = projection([1.65, 47.0]);
+
+var path = d3.geo.path()
+	.projection(projection);
+
+var zoom = d3.behavior.zoom()
+	.scale(projection.scale() * 2 * Math.PI)
+	.scaleExtent([1 << 11, 1 << 23])
+	.translate([width - center[0], height - center[1]])
+	.on("zoom", zoomed);
+
+var svg = d3.select("#main_content").append("svg")
+	.attr("width", width)
+	.attr("height", height);
+
+var raster = svg.append("g");
+
+var points = svg.append("g");
+var hexbin_layer = svg.append("g");
+
+var liste = [];
+
+var carburant = 'gasoil';
+
+queue()
+	.defer(d3.tsv, "https://rawgithub.com/prix-carburant/prix-carburant-data/master/prix.tsv")
+	.defer(d3.tsv, "https://rawgithub.com/prix-carburant/prix-carburant-data/master/points-de-vente.tsv")
+	.await(function(error, prix, points_de_vente) {
+		prix = prix.filter(function(d) { return +d[carburant] > 0 && +d[carburant] < 2.6; });
+
+		median = d3.median(prix, function(d) { return +d[carburant]; });
+
+		prix = d3.nest()
+			.key(function(d) { return d.id; })
+			.rollup(function(d) { return d[0]; })
+			.map(prix, d3.map);
+
+		points_de_vente.forEach(function(d) {
+			if (prix.has(d.id)) {
+				liste.push({
+					id: d.id,
+					lat: +d.latitude,
+					lon: +d.longitude,
+					prix: +prix.get(d.id)[carburant]
+				});
+			}
+		});
+
+		svg.call(zoom);
+
+		zoomed();
+});
+
+var color_scale = d3.scale.linear()
+	.range([0, 0, 0.5, 1, 1]);
+
+var color = d3.scale.linear()
+	.range(['green', 'yellow', 'red'])
+	.domain([0, 0.5, 1]);
+
+var opacity = d3.scale.linear()
+	.range([0.5, 0.8, 0.8])
+	.domain([0, 3, 4]);
+
+function zoomed() {
+	var tiles = tile
+		.scale(zoom.scale())
+		.translate(zoom.translate())
+		();
+
+	projection
+		.scale(zoom.scale() / 2 / Math.PI)
+		.translate(zoom.translate());
+
+	var hexbin = d3.hexbin()
+		.size([width, height])
+		.radius(10)
+		.x(function(d) {
+			return d.projected[0];
+		})
+		.y(function(d) {
+			d.projected = projection([d.lon, d.lat]);
+			return d.projected[1];
+		});
+
+	var hexbins = hexbin(liste);
+
+	hexbin_layer.selectAll('.hex').remove();
+
+	var hex = hexbin_layer.selectAll('.hex')
+		.data(hexbins);
+	
+	var numbers = [];
+	hex.enter()
+		.append('path')
+			.each(function(d) {
+				d.median = d3.median(d, function(d) { return d.prix; });
+
+				numbers.push(d.median);
+			})
+			.attr('class', 'hex')
+			.attr('d', function(d) { return hexbin.hexagon(); })
+			.append('title')
+				.text(function(d) { return "Prix médian du " + carburant + " sur " + d.length + " station(s) : " + Math.round(d.median * 100)/100 + " €"; });
+
+	numbers = numbers.sort(d3.ascending);
+
+	min = d3.quantile(numbers, 0.1);
+	med = d3.median(numbers);
+	max = d3.quantile(numbers, 0.9);
+
+	color_scale.domain([0, min, med, max, 50]);
+	
+	hex.exit().remove();
+
+	hex.attr('transform', function(d) { return "translate(" + [d.x, d.y] + ")"; });
+	hex.style('fill', function(d) { return color(color_scale(d.median)); });
+	hex.style('opacity', function(d) { return opacity(d.length); });
+
+	var image = raster
+		.attr("transform", "scale(" + tiles.scale + ") translate(" + tiles.translate + ")")
+		.selectAll("image")
+		.data(tiles, function(d) { return d; });
+
+	image.exit()
+		.remove();
+
+	image.enter().append("image")
+		.attr("xlink:href", function(d) { return "http://" + ["a", "b", "c", "d"][Math.random() * 4 | 0] + ".tiles.mapbox.com/v3/examples.map-vyofok3q/" + d[2] + "/" + d[0] + "/" + d[1] + ".png"; })
+		.attr("width", 1)
+		.attr("height", 1)
+		.attr("x", function(d) { return d[0]; })
+		.attr("y", function(d) { return d[1]; });
+}
+
+
+</script>
+
+
+      </section>
+    </div>
+
+    <!-- FOOTER  -->
+    <div id="footer_wrap" class="outer">
+      <footer class="inner">
+        <p class="copyright">Prix carburant maintained by <a href="https://github.com/prix-carburant">prix-carburant</a></p>
+        <p>Published with <a href="http://pages.github.com">GitHub Pages</a></p>
+      </footer>
+    </div>
+
+    
+
+  </body>
+</html>
